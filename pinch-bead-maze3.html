@@ -1,0 +1,959 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>body{margin:0}[hidden]{display:none!important}</style></head><body>
+<title>Pinch Bead Maze</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Nunito:wght@500;700&display=swap">
+<style>
+/* Layout: full-bleed camera feed, a 3D scene on top, a 2D overlay for hands and guides, slim floating toolbar. Single dark look over live video. */
+:root {
+  --ink: #12151f;
+  --panel: rgba(18, 21, 31, 0.74);
+  --line: rgba(255, 255, 255, 0.14);
+  --text: #f4f1ff;
+  --muted: #b9b4cf;
+  --accent: #ffcf3f;
+  --ok: #5fe0a0;
+  --bad: #ff6b5b;
+  --display: "Baloo 2", "Trebuchet MS", system-ui, sans-serif;
+  --body: "Nunito", system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: radial-gradient(120% 90% at 50% 20%, #2a3150 0%, var(--ink) 70%);
+  color: var(--text); font-family: var(--body);
+  overflow: hidden; touch-action: none;
+}
+#video {
+  position: fixed; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; transform: scaleX(-1);
+}
+#video:not(.live) { visibility: hidden; }
+#gl, #ov { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#ov { pointer-events: none; }
+
+.bar {
+  position: fixed; top: 0; left: 0; right: 0;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  pointer-events: none;
+}
+.bar > * { pointer-events: auto; }
+.brand {
+  font-family: var(--display); font-weight: 800; font-size: 1.5rem; line-height: 1;
+  margin-right: auto; text-shadow: 0 2px 10px rgba(0,0,0,.5);
+}
+.brand span { color: var(--accent); }
+.chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--panel); border: 1px solid var(--line);
+  padding: 7px 12px; border-radius: 999px; font-size: 0.85rem; font-weight: 700;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+button, select {
+  font: 700 0.85rem var(--body); color: var(--ink); background: var(--accent);
+  border: 0; border-radius: 999px; padding: 8px 14px; cursor: pointer;
+}
+.ghost, select { background: var(--panel); color: var(--text); border: 1px solid var(--line); }
+select { padding-right: 10px; }
+select.primary { background: var(--accent); color: var(--ink); border-color: transparent; }
+button:focus-visible, select:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
+label.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+.hint {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  width: max-content; max-width: calc(100% - 32px);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 8px 14px; font-size: 0.85rem; color: var(--muted); text-align: center; line-height: 1.4;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.hint b { color: var(--text); }
+
+.toast {
+  position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%) scale(.9);
+  font: 800 1.6rem var(--display); color: var(--bad);
+  text-shadow: 0 2px 14px rgba(0,0,0,.7);
+  opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; text-align: center;
+  max-width: calc(100% - 32px);
+}
+.toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.toast small { display: block; font: 700 0.95rem var(--body); color: var(--text); }
+
+.gate {
+  position: fixed; inset: 0; display: grid; place-items: center;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: rgba(18, 21, 31, 0.5);
+}
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 22px;
+  padding: 26px 24px; max-width: 27rem; display: grid; gap: 14px;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+.card h1 { margin: 0; font: 800 2rem/1.05 var(--display); text-wrap: balance; }
+.card p { margin: 0; color: var(--muted); line-height: 1.5; }
+.card .row { display: flex; gap: 10px; flex-wrap: wrap; }
+.card button { font-size: 1rem; padding: 11px 18px; }
+.err { color: #ffb4a8 !important; }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+
+<video id="video" playsinline muted></video>
+<canvas id="gl"></canvas>
+<canvas id="ov"></canvas>
+
+<div class="bar">
+  <div class="brand" id="brand">Bead <span>Maze</span></div>
+  <div class="chip"><i class="dot" id="dot"></i><span id="status">Camera off</span></div>
+  <label class="sr" for="sceneMode">Scene</label>
+  <select id="sceneMode" class="primary">
+    <option value="beads" selected>Scene: Bead maze</option>
+    <option value="rings">Scene: Ring &amp; pegs</option>
+  </select>
+  <label class="sr" for="level">Difficulty</label>
+  <select id="level">
+    <option value="easy">Easy grip</option>
+    <option value="normal" selected>Normal grip</option>
+    <option value="hard">Hard grip</option>
+  </select>
+  <label class="sr" for="depthMode">Hand depth direction</label>
+  <select id="depthMode">
+    <option value="mirror" selected>Depth: like a mirror</option>
+    <option value="reach">Depth: reach into scene</option>
+  </select>
+  <button class="ghost" id="resetBtn" type="button">Reset beads</button>
+</div>
+
+<div class="toast" id="toast">Slipped!<small>Follow the curve of the wire</small></div>
+
+<div class="hint" id="hint"></div>
+
+<div class="gate" id="gate">
+  <div class="card">
+    <h1>Grab things with your fingers</h1>
+    <p>Pinch with your thumb and index finger to pick something up. Slide beads along twisting wires, or switch scenes in the top bar to lift rings and drop them onto pegs. Move your hand closer to or farther from the camera to move in depth.</p>
+    <p id="gateMsg"></p>
+    <div class="row">
+      <button id="startBtn" type="button">Start camera</button>
+      <button class="ghost" id="mouseBtn" type="button">Use mouse instead</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script type="module">
+const THREE = window.THREE;
+const glCanvas = document.getElementById("gl");
+const ov = document.getElementById("ov");
+const octx = ov.getContext("2d");
+const video = document.getElementById("video");
+const statusEl = document.getElementById("status");
+const dot = document.getElementById("dot");
+const gate = document.getElementById("gate");
+const gateMsg = document.getElementById("gateMsg");
+const toastEl = document.getElementById("toast");
+const hintEl = document.getElementById("hint");
+const brandEl = document.getElementById("brand");
+const resetBtn = document.getElementById("resetBtn");
+
+const LEVELS = {
+  easy:   { tol: 1.45, depthW: 0.35 },
+  normal: { tol: 1.0,  depthW: 0.5 },
+  hard:   { tol: 0.7,  depthW: 0.75 },
+};
+let level = LEVELS.normal;
+document.getElementById("level").addEventListener("change", e => { level = LEVELS[e.target.value]; });
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+// mirror: hand closer to camera = object comes out of the scene toward you.
+// reach: hand closer to camera = object goes deeper into the scene, as if reaching through the screen.
+let depthSign = 1;
+const depthSel = document.getElementById("depthMode");
+function setDepthMode(v) { depthSign = v === "reach" ? -1 : 1; depthSel.value = v; store.set("beadDepthMode", v); }
+{ const saved = store.get("beadDepthMode"); if (saved === "reach" || saved === "mirror") setDepthMode(saved); }
+depthSel.addEventListener("change", e => {
+  setDepthMode(e.target.value);
+  hands.forEach(h => { if (h.held) { h.scale0 = h.scale; h.D0 = camera.position.distanceTo(h.held.pos); } });
+});
+
+let W = innerWidth, H = innerHeight;
+
+// ---------- Three.js scene ----------
+const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, W / H, 0.1, 100);
+const target = new THREE.Vector3(0, 2.9, 0);
+let yaw = 0, pitch = 0.32, camDist = 18;
+function placeCamera() {
+  camera.position.set(
+    target.x + camDist * Math.sin(yaw) * Math.cos(pitch),
+    target.y + camDist * Math.sin(pitch),
+    target.z + camDist * Math.cos(yaw) * Math.cos(pitch));
+  camera.lookAt(target);
+  camera.updateMatrixWorld();
+}
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a6a4a, 0.75));
+const sun = new THREE.DirectionalLight(0xffffff, 0.95);
+sun.position.set(5, 13, 9);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -10, right: 10, top: 10, bottom: -10, near: 1, far: 40 });
+scene.add(sun);
+
+// Wooden base with a generated grain texture
+function woodTexture() {
+  const c = document.createElement("canvas"); c.width = 512; c.height = 256;
+  const g = c.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, "#e6ad6c"); grad.addColorStop(1, "#c88a4c");
+  g.fillStyle = grad; g.fillRect(0, 0, 512, 256);
+  for (let i = 0; i < 28; i++) {
+    g.strokeStyle = `rgba(120,70,30,${0.08 + Math.random() * 0.16})`;
+    g.lineWidth = 1 + Math.random() * 2;
+    const y0 = Math.random() * 256, a = 2 + Math.random() * 5, f = 60 + Math.random() * 80;
+    g.beginPath();
+    for (let x = 0; x <= 512; x += 8) g.lineTo(x, y0 + Math.sin((x + i * 31) / f) * a);
+    g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding;
+  return t;
+}
+const wood = woodTexture();
+const base = new THREE.Mesh(
+  new THREE.BoxGeometry(14, 0.8, 8.4),
+  new THREE.MeshStandardMaterial({ map: wood, roughness: 0.7 }));
+base.position.y = -0.4; base.receiveShadow = true; base.castShadow = true;
+scene.add(base);
+
+const beadGroup = new THREE.Group(); scene.add(beadGroup);
+const ringGroup = new THREE.Group(); scene.add(ringGroup);
+
+// ---------- Wires (3D) ----------
+const WIRES = [
+  { color: 0xe8433f, beads: [0xffd23f, 0x3fa7ff, 0xff8fd1, 0x5fe0a0],
+    pts: [[-5.6,-0.2,-1.6],[-5.6,4,-1.6],[-4.2,6.1,0],[-2.2,5.2,2.3],[0,3,2.8],[2.1,5.6,1],[4.1,6.1,-1.6],[5.6,4,-1.6],[5.6,-0.2,-1.6]] },
+  { color: 0x2f7de1, beads: [0xff6b3f, 0xffffff, 0xffd23f],
+    pts: [[-4.6,-0.2,2.6],[-4.4,3,2.9],[-2.6,3.3,0],[-1,5,-2.4],[1,4.8,-2.8],[2.5,2.4,0],[4.4,3,2.9],[4.6,-0.2,2.6]] },
+  { color: 0xf2b417, beads: [0x8b5cf6, 0xe8433f, 0x3fd0c9, 0xff8fd1],
+    pts: [[-3.2,-0.2,-3],[-3.1,2,-3.2],[-1.6,2.3,-0.6],[-0.5,6.6,0.4],[1.1,6.9,-0.6],[2.1,1.8,-3],[3.1,-0.2,-3]] },
+  { color: 0x26b36b, beads: [0xffd23f, 0xe8433f, 0xffffff],
+    pts: [[-1.6,-0.2,0.6],[-1.6,1.5,0.6],[-0.4,2.6,2.1],[0.9,2.1,0.9],[0.3,1.3,-0.9],[-0.9,2.1,-1.6],[-0.8,3.6,0],[0.6,4.1,1.3],[1.7,2.9,1.6],[1.9,-0.2,1.2]] },
+];
+const N = 500;
+WIRES.forEach(w => {
+  w.curve = new THREE.CatmullRomCurve3(w.pts.map(p => new THREE.Vector3(...p)), false, "centripetal");
+  w.L = w.curve.getLength();
+  w.samples = w.curve.getSpacedPoints(N);
+  w.tangents = w.samples.map((_, i) => w.curve.getTangentAt(i / N));
+  w.mat = new THREE.MeshStandardMaterial({ color: w.color, metalness: 0.35, roughness: 0.3, emissive: 0x000000 });
+  const mesh = new THREE.Mesh(new THREE.TubeGeometry(w.curve, 400, 0.11, 12, false), w.mat);
+  mesh.castShadow = true; beadGroup.add(mesh);
+});
+
+// ---------- Beads ----------
+const BEAD_LEN = 0.86;
+const SHAPES = ["sphere", "cyl", "cube", "sphere", "cyl"];
+const geoms = {
+  sphere: new THREE.SphereGeometry(0.42, 28, 20),
+  cyl: new THREE.CylinderGeometry(0.4, 0.4, 0.62, 28),
+  cube: new THREE.BoxGeometry(0.62, 0.62, 0.62),
+};
+const UP = new THREE.Vector3(0, 1, 0), DOWN = new THREE.Vector3(0, -1, 0), ZAX = new THREE.Vector3(0, 0, 1);
+let beads = [];
+WIRES.forEach((w, wi) => w.beads.forEach((color, i) => {
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.42, metalness: 0.05, emissive: 0x000000 });
+  const mesh = new THREE.Mesh(geoms[SHAPES[(i + wi) % SHAPES.length]], mat);
+  mesh.castShadow = true; beadGroup.add(mesh);
+  beads.push({ wire: wi, idx: i, s: 0, mesh, mat, held: null, pos: new THREE.Vector3(), tan: new THREE.Vector3() });
+}));
+
+function resetBeads() {
+  beads.forEach(b => { if (b.held) b.held.held = null; b.held = null; b.s = 0.6 + b.idx * BEAD_LEN; });
+  WIRES.forEach((_, wi) => relax(wi, null));
+  beads.forEach(placeBead);
+}
+
+function sampleAt(w, s, outP, outT) {
+  const f = Math.max(0, Math.min(N, (s / w.L) * N));
+  const i = Math.min(N - 1, Math.floor(f)), t = f - i;
+  outP.lerpVectors(w.samples[i], w.samples[i + 1], t);
+  if (outT) outT.lerpVectors(w.tangents[i], w.tangents[i + 1], t).normalize();
+}
+
+function placeBead(b) {
+  sampleAt(WIRES[b.wire], b.s, b.pos, b.tan);
+  b.mesh.position.copy(b.pos);
+  b.mesh.quaternion.setFromUnitVectors(UP, b.tan);
+  b.mesh.scale.setScalar(b.held ? 1.12 : 1);
+  b.mat.emissive.setHex(b.held ? 0x333333 : 0x000000);
+}
+
+// Beads on a wire push each other instead of overlapping
+function relax(wi, mover) {
+  const w = WIRES[wi], d = BEAD_LEN, lo = 0.55, hi = w.L - 0.55;
+  const list = beads.filter(b => b.wire === wi).sort((a, b) => a.s - b.s);
+  for (let pass = 0; pass < 2; pass++) {
+    const mi = mover ? list.indexOf(mover) : -1;
+    if (mi >= 0) {
+      for (let i = mi + 1; i < list.length; i++) list[i].s = Math.max(list[i].s, list[i-1].s + d);
+      for (let i = mi - 1; i >= 0; i--) list[i].s = Math.min(list[i].s, list[i+1].s - d);
+    }
+    list[list.length - 1].s = Math.min(list[list.length - 1].s, hi);
+    for (let i = list.length - 2; i >= 0; i--) list[i].s = Math.min(list[i].s, list[i+1].s - d);
+    list[0].s = Math.max(list[0].s, lo);
+    for (let i = 1; i < list.length; i++) list[i].s = Math.max(list[i].s, list[i-1].s + d);
+  }
+}
+
+// ---------- Ring & peg board ----------
+const RING_R = 0.72, RING_T = 0.17, PEG_R = 0.2;
+const CLEAR = RING_R - RING_T - PEG_R;          // how far a ring can wobble on a peg
+const RING_OUTER = RING_R + RING_T;
+const PEGS = [
+  { x: -4.2, z: -1.3, h: 3.4 },
+  { x: -1.4, z:  1.0, h: 2.6 },
+  { x:  1.4, z: -1.3, h: 3.4 },
+  { x:  4.2, z:  1.0, h: 2.6 },
+];
+const pegMat = new THREE.MeshStandardMaterial({ color: 0xf0d2a2, roughness: 0.55 });
+PEGS.forEach(p => {
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(PEG_R, PEG_R, p.h, 20), pegMat);
+  shaft.position.set(p.x, p.h / 2, p.z); shaft.castShadow = true;
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(PEG_R, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), pegMat);
+  cap.position.set(p.x, p.h, p.z); cap.castShadow = true;
+  const foot = new THREE.Mesh(new THREE.CylinderGeometry(PEG_R * 2.2, PEG_R * 2.6, 0.12, 24), pegMat);
+  foot.position.set(p.x, 0.06, p.z); foot.receiveShadow = true;
+  ringGroup.add(shaft, cap, foot);
+});
+
+const RING_COLORS = [0xe8433f, 0xf28c28, 0xf2c617, 0x26b36b, 0x2f7de1, 0x8b5cf6];
+const ringGeo = new THREE.TorusGeometry(RING_R, RING_T, 18, 48);
+const rings = RING_COLORS.map((color, i) => {
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.08, emissive: 0x000000 });
+  const mesh = new THREE.Mesh(ringGeo, mat);
+  mesh.castShadow = true; mesh.receiveShadow = true; ringGroup.add(mesh);
+  return { isRing: true, idx: i, mesh, mat, held: null, state: "rest", peg: -1,
+    pos: new THREE.Vector3(), quat: new THREE.Quaternion(), vel: new THREE.Vector3(),
+    tPos: new THREE.Vector3(), tQuat: new THREE.Quaternion() };
+});
+const FLAT = new THREE.Quaternion().setFromUnitVectors(ZAX, UP);
+
+function resetRings() {
+  rings.forEach((r, i) => {
+    if (r.held) r.held.held = null;
+    r.held = null; r.state = "rest"; r.vel.set(0, 0, 0);
+    r.quat.copy(FLAT);
+    if (i < 3) { r.peg = 0; r.pos.set(PEGS[0].x, RING_T + i * 2 * RING_T, PEGS[0].z); }
+    else { r.peg = -1; r.pos.set(-2.4 + (i - 3) * 2.4, RING_T, 3.0); }
+    r.mesh.position.copy(r.pos); r.mesh.quaternion.copy(r.quat);
+  });
+}
+
+const ringAxis = (q, out) => out.copy(ZAX).applyQuaternion(q);
+const horiz = (a, px, pz) => Math.hypot(a.x - px, a.z - pz);
+
+// Lowest point of a tilted ring below its center
+function ringHalfHeight(q) {
+  const ay = Math.abs(ringAxis(q, tmpA).y);
+  return RING_R * Math.sqrt(Math.max(0, 1 - ay * ay)) + RING_T * ay;
+}
+
+// Resting height on a peg: one ring thickness per ring already sitting below
+function pegStackY(pi, r) {
+  let k = 0;
+  for (const o of rings) if (o !== r && o.peg === pi && o.state === "rest" && o.pos.y < r.pos.y + 0.01) k++;
+  return RING_T + k * 2 * RING_T;
+}
+function floorY(r, q) {
+  let y = ringHalfHeight(q);
+  for (const o of rings) {
+    if (o === r || o.peg >= 0 || o.state !== "rest" || o.held) continue;
+    if (horiz(r.pos, o.pos.x, o.pos.z) < RING_OUTER * 1.7 && o.pos.y < r.pos.y) y = Math.max(y, o.pos.y + 2 * RING_T);
+  }
+  return y;
+}
+
+function limitTilt(q, maxAngle) {
+  const a = ringAxis(q, tmpA);
+  const up = a.y >= 0 ? UP : DOWN;
+  const ang = a.angleTo(up);
+  if (ang <= maxAngle) return q;
+  const axis = tmpB.crossVectors(a, up).normalize();
+  return tmpQ.setFromAxisAngle(axis, ang - maxAngle).multiply(q);
+}
+
+// Apply the board, pegs and stacking to where the hand wants the ring.
+// Returns how far the hand is from where the ring can actually be.
+function constrainRing(r, want, wantQ) {
+  const C = tmpC.copy(want);
+  let q = r.tQuat.copy(wantQ);
+  const prevY = r.pos.y;
+  if (r.peg >= 0) {
+    const p = PEGS[r.peg];
+    if (C.y > p.h + RING_T * 1.5) r.peg = -1; // lifted off the top
+    else {
+      q = r.tQuat.copy(limitTilt(q, 0.45));
+      const dx = C.x - p.x, dz = C.z - p.z, d = Math.hypot(dx, dz);
+      if (d > CLEAR) { C.x = p.x + dx / d * CLEAR; C.z = p.z + dz / d * CLEAR; }
+      C.y = Math.max(C.y, pegStackY(r.peg, r));
+    }
+  }
+  if (r.peg < 0) {
+    const a = ringAxis(q, tmpA);
+    PEGS.forEach((p, pi) => {
+      if (r.peg >= 0 || C.y > p.h + RING_T) return;
+      const dx = C.x - p.x, dz = C.z - p.z, d = Math.hypot(dx, dz);
+      if (prevY > p.h && d < CLEAR + 0.25 && Math.abs(a.y) > 0.6) { r.peg = pi; return; }
+      const minD = RING_OUTER + PEG_R;
+      if (d < minD) {
+        const ux = d > 1e-4 ? dx / d : 1, uz = d > 1e-4 ? dz / d : 0;
+        C.x = p.x + ux * minD; C.z = p.z + uz * minD;
+      }
+    });
+    C.y = Math.max(C.y, floorY(r, q));
+  }
+  r.tPos.copy(C);
+  camera.getWorldDirection(viewDir);
+  tmpA.subVectors(C, want);
+  const dz = tmpA.dot(viewDir);
+  tmpA.addScaledVector(viewDir, -dz);
+  return Math.sqrt(tmpA.lengthSq() + (dz * level.depthW) ** 2);
+}
+
+function updateRings(dt) {
+  const kp = 1 - Math.exp(-dt * 20), kq = 1 - Math.exp(-dt * 14);
+  for (const r of rings) {
+    // A resting ring whose support was taken away starts falling again
+    if (r.state === "rest") {
+      const support = r.peg >= 0 ? pegStackY(r.peg, r) : floorY(r, r.quat);
+      if (r.pos.y > support + 0.02) { r.state = "fall"; r.vel.set(0, 0, 0); }
+    }
+    if (r.state === "held") {
+      tmpA.copy(r.pos);
+      r.pos.lerp(r.tPos, kp);
+      r.quat.slerp(r.tQuat, kq);
+      tmpB.subVectors(r.pos, tmpA).divideScalar(Math.max(dt, 1e-3));
+      r.vel.lerp(tmpB, 0.3);
+    } else if (r.state === "fall") {
+      const prevY = r.pos.y;
+      r.vel.y -= 22 * dt;
+      r.vel.x *= 0.985; r.vel.z *= 0.985;
+      r.pos.addScaledVector(r.vel, dt);
+      const a = ringAxis(r.quat, tmpA);
+      const flat = tmpQ.setFromUnitVectors(ZAX, a.y >= 0 ? UP : DOWN);
+      let floor;
+      if (r.peg < 0) {
+        PEGS.forEach((p, pi) => {
+          if (r.peg >= 0 || r.pos.y > p.h + RING_T) return;
+          const dx = r.pos.x - p.x, dz = r.pos.z - p.z, d = Math.hypot(dx, dz);
+          if (prevY > p.h && d < CLEAR + 0.3 && Math.abs(a.y) > 0.45) { r.peg = pi; return; }
+          const minD = RING_OUTER + PEG_R;
+          if (d < minD) {
+            const ux = d > 1e-4 ? dx / d : 1, uz = d > 1e-4 ? dz / d : 0;
+            r.pos.x = p.x + ux * minD; r.pos.z = p.z + uz * minD;
+            r.vel.x = ux * 2.5; r.vel.z = uz * 2.5; // bounce off the peg
+          }
+        });
+      }
+      if (r.peg >= 0) {
+        const p = PEGS[r.peg];
+        r.pos.x += (p.x - r.pos.x) * 0.15; r.pos.z += (p.z - r.pos.z) * 0.15;
+        r.vel.x = r.vel.z = 0;
+        r.quat.slerp(flat, 1 - Math.exp(-dt * 10));
+        floor = pegStackY(r.peg, r);
+      } else {
+        r.quat.slerp(flat, 1 - Math.exp(-dt * 4));
+        floor = floorY(r, r.quat);
+      }
+      const bx = 6.9 - RING_OUTER, bz = 4.1 - RING_OUTER;
+      r.pos.x = Math.max(-bx, Math.min(bx, r.pos.x));
+      r.pos.z = Math.max(-bz, Math.min(bz, r.pos.z));
+      if (r.pos.y <= floor) {
+        if (r.peg < 0 && Math.abs(r.vel.y) > 4) { r.pos.y = floor; r.vel.y *= -0.25; r.vel.x *= 0.5; r.vel.z *= 0.5; }
+        else {
+          r.pos.y = floor; r.vel.set(0, 0, 0);
+          r.quat.copy(flat); r.state = "rest";
+          if (r.peg >= 0) { r.pos.x = PEGS[r.peg].x; r.pos.z = PEGS[r.peg].z; }
+          r.pos.y = r.peg >= 0 ? pegStackY(r.peg, r) : floorY(r, r.quat);
+        }
+      }
+    }
+    r.mesh.position.copy(r.pos);
+    r.mesh.quaternion.copy(r.quat);
+    r.mesh.scale.setScalar(r.held ? 1.04 : 1);
+    r.mat.emissive.setHex(r.held ? 0x2a2a2a : 0x000000);
+  }
+}
+
+// Find the ring whose rim passes closest to a screen point
+function nearestRingRim(sx, sy, maxPx) {
+  let pick = null, pd = maxPx, pt = new THREE.Vector3();
+  const u = new THREE.Vector3(), v = new THREE.Vector3(), q = new THREE.Vector3();
+  for (const r of rings) {
+    if (r.held) continue;
+    u.set(1, 0, 0).applyQuaternion(r.quat); v.set(0, 1, 0).applyQuaternion(r.quat);
+    for (let k = 0; k < 32; k++) {
+      const t = (k / 32) * Math.PI * 2;
+      q.copy(r.pos).addScaledVector(u, Math.cos(t) * RING_R).addScaledVector(v, Math.sin(t) * RING_R);
+      const [x, y] = toScreen(q);
+      const d = Math.hypot(x - sx, y - sy);
+      if (d < pd) { pd = d; pick = r; pt.copy(q); }
+    }
+  }
+  return pick ? { ring: pick, point: pt } : null;
+}
+
+function grabRing(owner, r, rimPt) {
+  r.held = owner; owner.held = r; r.state = "held";
+  r.tPos.copy(r.pos); r.tQuat.copy(r.quat);
+  rayDir(owner.sx, owner.sy, tmpA);
+  owner.D0 = camera.position.distanceTo(rimPt);
+  owner.scale0 = owner.scale;
+  owner.offset = rimPt.clone().sub(camera.position.clone().addScaledVector(tmpA, owner.D0));
+  owner.centerOff = r.pos.clone().sub(rimPt);
+  owner.grabQ = r.quat.clone();
+  owner.dev = 0;
+}
+
+// ---------- Geometry helpers ----------
+const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3();
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
+const tmpQ = new THREE.Quaternion(), tmpM = new THREE.Matrix4();
+const viewDir = new THREE.Vector3();
+function toScreen(v) {
+  tmpV2.copy(v).project(camera);
+  return [(tmpV2.x + 1) / 2 * W, (1 - tmpV2.y) / 2 * H, tmpV2.z];
+}
+function rayDir(sx, sy, out) {
+  out.set((sx / W) * 2 - 1, -(sy / H) * 2 + 1, 0.5).unproject(camera).sub(camera.position).normalize();
+  return out;
+}
+
+function slide3D(b, Hp) {
+  const w = WIRES[b.wire];
+  const win = 1.7, i0 = Math.max(0, Math.floor(((b.s - win) / w.L) * N)), i1 = Math.min(N, Math.ceil(((b.s + win) / w.L) * N));
+  camera.getWorldDirection(viewDir);
+  let best = -1, bestD = Infinity;
+  for (let i = i0; i <= i1; i++) {
+    tmpV.subVectors(w.samples[i], Hp);
+    const dz = tmpV.dot(viewDir);
+    tmpV.addScaledVector(viewDir, -dz);
+    const d = Math.sqrt(tmpV.lengthSq() + (dz * level.depthW) ** 2);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  if (bestD <= level.tol) { b.s = (best / N) * w.L; relax(b.wire, b); }
+  return bestD;
+}
+
+function slide2D(b, sx, sy) {
+  const w = WIRES[b.wire];
+  const win = 1.7, i0 = Math.max(0, Math.floor(((b.s - win) / w.L) * N)), i1 = Math.min(N, Math.ceil(((b.s + win) / w.L) * N));
+  let best = -1, bestD = Infinity;
+  for (let i = i0; i <= i1; i++) {
+    const [x, y] = toScreen(w.samples[i]);
+    const d = Math.hypot(x - sx, y - sy);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  const tolPx = level.tol * Math.min(W, H) * 0.06;
+  if (bestD <= tolPx) { b.s = (best / N) * w.L; relax(b.wire, b); }
+  return bestD / tolPx * level.tol;
+}
+
+function nearestBeadOnScreen(sx, sy, maxPx) {
+  let pick = null, pd = maxPx;
+  for (const b of beads) {
+    if (b.held) continue;
+    const [x, y] = toScreen(b.pos);
+    const d = Math.hypot(x - sx, y - sy);
+    if (d < pd) { pd = d; pick = b; }
+  }
+  return pick;
+}
+
+let toastTimer = 0;
+function release(owner) {
+  const o = owner.held;
+  if (!o) return;
+  o.held = null; owner.held = null;
+  if (o.isRing) { o.state = "fall"; o.vel.clampLength(0, 12); }
+}
+function slip(owner) {
+  if (!owner.held) return;
+  release(owner);
+  toastEl.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1100);
+}
+
+// ---------- Scene switching ----------
+let mode = "beads";
+const sceneSel = document.getElementById("sceneMode");
+const COPY = {
+  beads: {
+    brand: 'Bead <span>Maze</span>', reset: "Reset beads",
+    toast: 'Slipped!<small>Follow the curve of the wire</small>',
+    hint: '<b>Pinch</b> a bead and trace the wire with your hand. Follow its bends up, down, sideways, and <b>toward or away</b> from the camera. Stray off the line and the bead slips.',
+  },
+  rings: {
+    brand: 'Ring <span>Pegs</span>', reset: "Reset rings",
+    toast: 'Dropped!<small>The ring slipped out of your fingers</small>',
+    hint: '<b>Pinch</b> the edge of a ring to lift it. The ring tilts and turns with your fingers. Hold it flat over a peg and let go to drop it on. Push it into a peg or the board and it falls.',
+  },
+};
+function setMode(m) {
+  hands.forEach(release); release(pointer);
+  mode = m; sceneSel.value = m; store.set("pinchScene", m);
+  beadGroup.visible = m === "beads"; ringGroup.visible = m === "rings";
+  const c = COPY[m];
+  brandEl.innerHTML = c.brand; resetBtn.textContent = c.reset;
+  toastEl.innerHTML = c.toast; hintEl.innerHTML = c.hint;
+}
+sceneSel.addEventListener("change", e => setMode(e.target.value));
+
+// ---------- Hands ----------
+let landmarker = null, camOn = false, lastVideoTime = -1;
+const DEPTH_K = 7; // world units per log-change in apparent hand size
+const hands = [0, 1].map(() => ({ pinching: false, held: null, sx: 0, sy: 0, scale: 0, tips: null, seen: false, dev: 0, Hp: new THREE.Vector3(), fp: null, fa: null }));
+
+function videoToScreen(x, y) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const sc = Math.max(W / vw, H / vh);
+  const px = (W - vw * sc) / 2 + x * vw * sc, py = (H - vh * sc) / 2 + y * vh * sc;
+  return [W - px, py]; // mirrored like a selfie
+}
+
+// Finger frame in scene space from MediaPipe's 3D hand landmarks:
+// fp = where thumb and index point (toward the pinch), fa = the squeeze axis between them.
+// A ring pinched by its rim lies across fp, with fa as its axis.
+function updateFingerFrame(h, wl) {
+  if (!wl) return;
+  const dir = (tip, b) => new THREE.Vector3(-(tip.x - b.x), -(tip.y - b.y), -depthSign * (tip.z - b.z))
+    .applyQuaternion(camera.quaternion).normalize();
+  const iDir = dir(wl[8], wl[5]), tDir = dir(wl[4], wl[2]);
+  const p = iDir.clone().add(tDir);
+  if (p.lengthSq() < 1e-6) return;
+  p.normalize();
+  const a = iDir.clone().sub(tDir);
+  a.addScaledVector(p, -a.dot(p));
+  if (a.lengthSq() < 1e-6) return;
+  a.normalize();
+  if (!h.fp) { h.fp = p; h.fa = a; return; }
+  if (a.dot(h.fa) < 0) a.negate(); // a ring looks the same flipped; keep it from spinning
+  h.fp.lerp(p, 0.45).normalize();
+  h.fa.lerp(a, 0.45);
+  h.fa.addScaledVector(h.fp, -h.fa.dot(h.fp)).normalize();
+}
+
+function fingerQuat(p, a, out) {
+  const y = tmpB.crossVectors(a, p);
+  tmpM.makeBasis(p, y, a);
+  return out.setFromRotationMatrix(tmpM);
+}
+
+async function startCamera() {
+  gateMsg.textContent = "Loading hand tracking…"; gateMsg.className = "";
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    video.srcObject = stream;
+    await video.play();
+    video.classList.add("live");
+  } catch (e) {
+    gateMsg.textContent = "The camera isn't available here. If this page is open inside Claude, download the file and open it in Chrome or Safari. You can also play with the mouse.";
+    gateMsg.className = "err";
+    return;
+  }
+  try {
+    const vision = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14");
+    const fileset = await vision.FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    const opts = delegate => ({
+      baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate },
+      runningMode: "VIDEO", numHands: 2,
+      minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5,
+    });
+    try { landmarker = await vision.HandLandmarker.createFromOptions(fileset, opts("GPU")); }
+    catch { landmarker = await vision.HandLandmarker.createFromOptions(fileset, opts("CPU")); }
+  } catch (e) {
+    gateMsg.textContent = "The camera works, but the hand-tracking model couldn't load. Check your internet connection and reload. Mouse dragging still works.";
+    gateMsg.className = "err";
+    camOn = true; setStatus("Camera on · no tracking", false);
+    return;
+  }
+  camOn = true; gate.hidden = true;
+  setStatus("Show your hand", false);
+}
+function setStatus(t, on) { statusEl.textContent = t; dot.classList.toggle("on", on); }
+
+function trackHands() {
+  if (!landmarker || video.readyState < 2 || video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+  const res = landmarker.detectForVideo(video, performance.now());
+  const found = (res.landmarks || []).slice(0, 2);
+  const world = res.worldLandmarks || [];
+  const vw = video.videoWidth, vh = video.videoHeight;
+  hands.forEach(h => h.seen = false);
+
+  found.forEach((lm, i) => {
+    const h = hands[i];
+    const fresh = !h.tips;
+    h.seen = true;
+    // Apparent hand size (wrist → middle knuckle) stands in for distance from the camera
+    const palm = Math.hypot((lm[0].x - lm[9].x) * vw, (lm[0].y - lm[9].y) * vh) / vh || 0.1;
+    const pinchGap = Math.hypot((lm[4].x - lm[8].x) * vw, (lm[4].y - lm[8].y) * vh) / vh;
+    const ratio = pinchGap / palm;
+    const was = h.pinching;
+    h.pinching = was ? ratio < 0.5 : ratio < 0.33;
+
+    const [mx, my] = videoToScreen((lm[4].x + lm[8].x) / 2, (lm[4].y + lm[8].y) / 2);
+    h.sx = fresh ? mx : h.sx + (mx - h.sx) * 0.6;
+    h.sy = fresh ? my : h.sy + (my - h.sy) * 0.6;
+    h.scale = fresh || !h.scale ? palm : h.scale + (palm - h.scale) * 0.25;
+    h.tips = [videoToScreen(lm[4].x, lm[4].y), videoToScreen(lm[8].x, lm[8].y)];
+    if (fresh) { h.fp = null; h.fa = null; }
+    updateFingerFrame(h, world[i]);
+
+    const grabPx = Math.max(42, Math.min(W, H) * 0.06);
+    if (h.pinching && !was) {
+      if (mode === "beads") {
+        const b = nearestBeadOnScreen(h.sx, h.sy, grabPx);
+        if (b) {
+          b.held = h; h.held = b;
+          rayDir(h.sx, h.sy, tmpV);
+          h.D0 = camera.position.distanceTo(b.pos);
+          h.scale0 = h.scale;
+          h.offset = b.pos.clone().sub(camera.position.clone().addScaledVector(tmpV, h.D0));
+        }
+      } else {
+        const hit = nearestRingRim(h.sx, h.sy, grabPx);
+        if (hit) grabRing(h, hit.ring, hit.point);
+      }
+    }
+    if (!h.pinching && h.held) release(h);
+
+    if (h.held) {
+      // 3D hand point: screen ray + depth from hand size
+      rayDir(h.sx, h.sy, tmpV);
+      const D = h.D0 - depthSign * DEPTH_K * Math.log(h.scale / h.scale0);
+      h.Hp.copy(camera.position).addScaledVector(tmpV, D).add(h.offset);
+      if (mode === "beads") {
+        h.dev = slide3D(h.held, h.Hp);
+        if (h.dev > level.tol) slip(h);
+      } else {
+        const want = new THREE.Vector3(), wantQ = new THREE.Quaternion();
+        if (h.fp) { fingerQuat(h.fp, h.fa, wantQ); want.copy(h.Hp).addScaledVector(h.fp, RING_R); }
+        else { wantQ.copy(h.grabQ); want.copy(h.Hp).add(h.centerOff); }
+        h.dev = constrainRing(h.held, want, wantQ);
+        if (h.dev > level.tol) slip(h);
+      }
+    }
+  });
+  hands.forEach(h => { if (!h.seen) { release(h); h.pinching = false; h.tips = null; } });
+
+  const n = found.length, holding = hands.some(h => h.held);
+  const thing = mode === "beads" ? "bead" : "ring";
+  const holdMsg = mode === "beads" ? "Holding · follow the wire" : "Holding · open fingers to drop";
+  setStatus(n === 0 ? "Show your hand" : holding ? holdMsg : n === 2 ? `2 hands · pinch a ${thing}` : `Hand found · pinch a ${thing}`, n > 0);
+}
+
+// ---------- Mouse / touch: grab, or drag empty space to turn the view ----------
+const pointer = { held: null, dev: 0, sx: 0, sy: 0, scale: 1 };
+let orbit = null;
+glCanvas.addEventListener("pointerdown", e => {
+  glCanvas.setPointerCapture(e.pointerId);
+  pointer.sx = e.clientX; pointer.sy = e.clientY;
+  if (mode === "beads") {
+    const b = nearestBeadOnScreen(e.clientX, e.clientY, 34);
+    if (b) { b.held = pointer; pointer.held = b; return; }
+  } else {
+    const hit = nearestRingRim(e.clientX, e.clientY, 30);
+    if (hit) { grabRing(pointer, hit.ring, hit.point); return; }
+  }
+  orbit = { x: e.clientX, y: e.clientY, yaw, pitch };
+});
+glCanvas.addEventListener("pointermove", e => {
+  pointer.sx = e.clientX; pointer.sy = e.clientY;
+  if (pointer.held && mode === "beads") {
+    pointer.dev = slide2D(pointer.held, e.clientX, e.clientY);
+    if (pointer.dev > level.tol) slip(pointer);
+  } else if (pointer.held) {
+    movePointerRing();
+  } else if (orbit) {
+    yaw = Math.max(-0.9, Math.min(0.9, orbit.yaw - (e.clientX - orbit.x) * 0.005));
+    pitch = Math.max(0.08, Math.min(0.75, orbit.pitch + (e.clientY - orbit.y) * 0.004));
+    placeCamera();
+  }
+});
+function movePointerRing() {
+  rayDir(pointer.sx, pointer.sy, tmpV);
+  const P = camera.position.clone().addScaledVector(tmpV, pointer.D0).add(pointer.offset);
+  const want = P.add(pointer.centerOff);
+  pointer.dev = constrainRing(pointer.held, want, pointer.grabQ);
+  if (pointer.dev > level.tol) slip(pointer);
+}
+// Mouse wheel pushes a held ring deeper or pulls it closer
+glCanvas.addEventListener("wheel", e => {
+  if (!pointer.held || mode !== "rings") return;
+  e.preventDefault();
+  pointer.D0 = Math.max(6, Math.min(40, pointer.D0 + e.deltaY * 0.01));
+  movePointerRing();
+}, { passive: false });
+const endPointer = () => { release(pointer); orbit = null; };
+glCanvas.addEventListener("pointerup", endPointer);
+glCanvas.addEventListener("pointercancel", endPointer);
+
+// ---------- 2D overlay: hands, grip meter, direction arrows ----------
+function arrow(x0, y0, x1, y1, col, head) {
+  const a = Math.atan2(y1 - y0, x1 - x0);
+  octx.strokeStyle = col; octx.fillStyle = col; octx.lineWidth = 3;
+  octx.beginPath(); octx.moveTo(x0, y0); octx.lineTo(x1, y1); octx.stroke();
+  octx.beginPath();
+  octx.moveTo(x1 + Math.cos(a) * head, y1 + Math.sin(a) * head);
+  octx.lineTo(x1 + Math.cos(a + 2.4) * head, y1 + Math.sin(a + 2.4) * head);
+  octx.lineTo(x1 + Math.cos(a - 2.4) * head, y1 + Math.sin(a - 2.4) * head);
+  octx.closePath(); octx.fill();
+}
+
+function gripColor(g) { return g > 0.6 ? "#5fe0a0" : g > 0.3 ? "#ffcf3f" : "#ff6b5b"; }
+
+function gripRing(x, y, rad, grip) {
+  octx.lineWidth = 5; octx.strokeStyle = "rgba(0,0,0,.35)";
+  octx.beginPath(); octx.arc(x, y, rad, 0, Math.PI * 2); octx.stroke();
+  octx.strokeStyle = gripColor(grip);
+  octx.beginPath(); octx.arc(x, y, rad, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * grip); octx.stroke();
+}
+
+function tether(owner, x, y, col) {
+  if (!owner.sx) return;
+  octx.setLineDash([6, 6]); octx.strokeStyle = col; octx.lineWidth = 2;
+  octx.beginPath(); octx.moveTo(owner.sx, owner.sy); octx.lineTo(x, y); octx.stroke();
+  octx.setLineDash([]);
+}
+
+function label(text, lx, ly) {
+  octx.font = "700 13px Nunito, system-ui, sans-serif";
+  octx.textAlign = "center";
+  octx.fillStyle = "rgba(18,21,31,.8)";
+  const tw = octx.measureText(text).width + 12;
+  octx.fillRect(lx - tw / 2, ly - 11, tw, 20);
+  octx.fillStyle = "#fff"; octx.fillText(text, lx, ly + 4);
+}
+
+function drawBeadGuides(owner) {
+  const b = owner.held;
+  const grip = Math.max(0, 1 - owner.dev / level.tol);
+  const [bx, by] = toScreen(b.pos);
+  gripRing(bx, by, 34, grip);
+  camera.getWorldDirection(viewDir);
+  for (const sgn of [1, -1]) {
+    tmpV.copy(b.pos).addScaledVector(b.tan, sgn * 1.1);
+    const [ax, ay] = toScreen(tmpV);
+    const len = Math.hypot(ax - bx, ay - by) || 1;
+    const sx = bx + (ax - bx) / len * 40, sy = by + (ay - by) / len * 40;
+    const depth = b.tan.dot(viewDir) * sgn; // + means away from camera
+    const head = 9 + Math.max(0, -depth) * 8;
+    if (len > 46) arrow(sx, sy, ax, ay, "rgba(255,255,255,.9)", head);
+    else { octx.fillStyle = "rgba(255,255,255,.9)"; octx.beginPath(); octx.arc(bx + (ax - bx) * 3, by + (ay - by) * 3, 5, 0, Math.PI * 2); octx.fill(); }
+    if (Math.abs(depth) > 0.45) {
+      const handCloser = (depth < 0) === (depthSign === 1);
+      const text = owner === pointer ? (depth < 0 ? "toward you" : "away") : handCloser ? "hand closer" : "hand back";
+      const lx = len > 46 ? ax + (ax - bx) / len * 26 : bx + (ax - bx) * 3;
+      const ly = len > 46 ? ay + (ay - by) / len * 26 : by + (ay - by) * 3 - 14;
+      label(text, lx, ly);
+    }
+  }
+  tether(owner, bx, by, gripColor(grip));
+}
+
+function drawRingGuides(owner) {
+  const r = owner.held;
+  const grip = Math.max(0, 1 - owner.dev / level.tol);
+  const [cx, cy] = toScreen(r.pos);
+  tmpA.setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(RING_OUTER).add(r.pos);
+  const [ex] = toScreen(tmpA);
+  gripRing(cx, cy, Math.abs(ex - cx) + 14, grip);
+  tether(owner, cx, cy, gripColor(grip));
+  // Show the drop spot when the ring is lined up over a peg
+  const a = ringAxis(r.quat, tmpB);
+  for (const p of PEGS) {
+    if (r.pos.y > p.h && horiz(r.pos, p.x, p.z) < CLEAR + 0.3) {
+      tmpA.set(p.x, p.h + 0.25, p.z);
+      const [px, py] = toScreen(tmpA);
+      label(Math.abs(a.y) > 0.6 ? "let go to drop on" : "tilt flatter", px, py - 18);
+    }
+  }
+}
+
+function drawOverlay() {
+  octx.clearRect(0, 0, W, H);
+  for (const h of hands) {
+    if (!h.tips) continue;
+    const col = h.held ? gripColor(Math.max(0, 1 - h.dev / level.tol)) : h.pinching ? "#ffcf3f" : "rgba(255,255,255,.85)";
+    octx.strokeStyle = col; octx.fillStyle = col; octx.lineWidth = 3;
+    octx.beginPath(); octx.moveTo(...h.tips[0]); octx.lineTo(...h.tips[1]); octx.stroke();
+    h.tips.forEach(([x, y]) => { octx.beginPath(); octx.arc(x, y, 6, 0, Math.PI * 2); octx.fill(); });
+    octx.beginPath(); octx.arc(h.sx, h.sy, h.pinching ? 12 : 22, 0, Math.PI * 2); octx.stroke();
+  }
+  for (const o of [...hands, pointer]) {
+    if (!o.held) continue;
+    if (o.held.isRing) drawRingGuides(o); else drawBeadGuides(o);
+  }
+}
+
+// ---------- Loop ----------
+function resize() {
+  W = innerWidth; H = innerHeight;
+  renderer.setSize(W, H, false);
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  ov.width = Math.round(W * dpr); ov.height = Math.round(H * dpr);
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  camera.aspect = W / H;
+  camDist = W / H < 0.8 ? 30 : W / H < 1.2 ? 22 : 18;
+  camera.updateProjectionMatrix();
+  placeCamera();
+}
+addEventListener("resize", resize);
+
+let lastT = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, Math.max(0.001, (now - lastT) / 1000));
+  lastT = now;
+  trackHands();
+  if (mode === "beads") {
+    beads.forEach(placeBead);
+    WIRES.forEach((w, wi) => w.mat.emissive.setHex(beads.some(b => b.wire === wi && b.held) ? 0x222222 : 0x000000));
+  } else {
+    updateRings(dt);
+  }
+  renderer.render(scene, camera);
+  drawOverlay();
+  requestAnimationFrame(frame);
+}
+
+document.getElementById("startBtn").addEventListener("click", startCamera);
+document.getElementById("mouseBtn").addEventListener("click", () => { gate.hidden = true; setStatus("Mouse mode · drag to grab", true); });
+resetBtn.addEventListener("click", () => { hands.forEach(release); release(pointer); if (mode === "beads") resetBeads(); else resetRings(); });
+
+resize();
+resetBeads();
+resetRings();
+setMode(store.get("pinchScene") === "rings" ? "rings" : "beads");
+requestAnimationFrame(frame);
+</script>
+
+</body></html>
